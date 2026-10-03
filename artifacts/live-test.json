@@ -1,0 +1,26 @@
+{
+  "test_id": "jmca070878",
+  "checks": [
+    "Read existing gateway configuration through the live web API",
+    "Create groups/users, enable/disable both, update messaging quotas",
+    "Create isolated MT/MO routes and reject deletion of referenced objects",
+    "Edit user identity and stopped connector while retaining credentials and route references",
+    "Start real Jasmin SMPP connector and establish transceiver bind",
+    "HTTP send \u2192 live MT route \u2192 SMPP submit_sm \u2192 successful response",
+    "SMPP deliver_sm \u2192 live MO route \u2192 HTTP callback with expected message",
+    "Persist both PB services to a unique test profile",
+    "Authenticated browser dashboard renders live accounts, connectors and routes",
+    "Stop connector and confirm service state",
+    "Remove all temporary objects; existing accounts, connectors and routes match baseline",
+    "Remove temporary profile files and check deployment profile for test objects"
+  ],
+  "gateway_id": "test",
+  "baseline": {
+    "users": 11,
+    "groups": 10,
+    "connectors": 18
+  },
+  "temporary_profile": "jmca070878",
+  "temporary_profile_removed": true,
+  "cleanup_errors": []
+}
