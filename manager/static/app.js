@@ -1,6 +1,7 @@
 const $ = s => document.querySelector(s);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let editingUser;
+let canEdit=false;
 let gateways=[], selectedGateway='', refreshVersion=0;
 function setBusy(value){busy=value;$('#gateway-select').disabled=value || !gateways.length;}
 function gatewayName(){return gateways.find(g=>g.id===selectedGateway)?.name || selectedGateway;}
@@ -10,10 +11,11 @@ const subtitles = {overview:'Your connections, users, and message routing in one
 function badge(text, kind='') { return `<span class="badge ${kind}">${esc(text)}</span>`; }
 function toast(text) { $('#toast').textContent=text; $('#toast').hidden=false; setTimeout(()=>$('#toast').hidden=true,4500); }
 async function api(path, method='GET', data) {
+  if(method!=='GET' && !canEdit)throw new Error('Sign in with MANAGER_TOKEN to make changes.');
   if(method!=='GET' && (!state || state.gateway_id!==selectedGateway))throw new Error('Refresh the selected gateway before making changes.');
   const response=await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json','X-Jasmin-Manager':'1',...(selectedGateway?{'X-Jasmin-Gateway':selectedGateway}:{}),...(token?{Authorization:'Bearer '+token}:{})},...(data?{body:JSON.stringify(data)}:{})});
   const result=await response.json();
-  if(response.status===401){if(!$('#login').open)$('#login').showModal(); throw new Error(result.error);}
+  if(response.status===401){canEdit=false;token='';sessionStorage.removeItem('jasmin-token');$('#modal').close();syncAccess();throw new Error(result.error);}
   if(!response.ok)throw new Error(result.error || 'Request failed.');
   return result;
 }
@@ -36,7 +38,7 @@ async function refresh(){
     const result=await api('state');
     if(version!==refreshVersion || target!==selectedGateway)return false;
     if(result.gateway_id!==target)throw new Error('Gateway response does not match your selection. Refresh before continuing.');
-    state=result;
+    state=result;canEdit=result.can_edit===true;syncAccess();
     $('#error').hidden=true;$('#demo-banner').hidden=state.mode!=='demo';$('#mode').textContent=state.mode==='demo'?'Demo workspace':'Live gateway';
     $('#connection-label').textContent=gatewayName()+(state.mode==='demo'?' · simulated':' · connected');
     $('#connection-dot').classList.add('online');$('#updated').textContent='Last refreshed '+new Date().toLocaleTimeString(); render();return true;
@@ -57,7 +59,7 @@ $('#gateway-select').addEventListener('change',async e=>{
   await refresh();
 });
 function navigate(next){page=next;location.hash=next;$('#title').textContent=titles[page];$('#subtitle').textContent=subtitles[page];$('#breadcrumb').textContent=page==='overview'?'Overview':titles[page];document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));if(state)render();}
-const action=(label,op,id,cls='')=>`<button class="${cls}" data-op="${op}" data-id="${esc(id)}">${label}</button>`;
+const action=(label,op,id,cls='')=>`<button class="${cls}" data-op="${op}" data-id="${esc(id)}">${op==='edit'&&!canEdit?'View':label}</button>`;
 function empty(kind){return `<div class="empty"><strong>No ${titles[kind].toLowerCase()} yet</strong>${kind==='users'?'Create a group, then add your first gateway user.':kind==='connectors'?'Add an SMPP provider to start connecting your gateway.':'Create your first configuration to get started.'}<br><button data-create="${kind}">+ Add ${kind==='connectors'?'connection':kind==='mt'||kind==='mo'?'route':kind.slice(0,-1)}</button></div>`;}
 function table(kind, compact=false){
  let rows=[], headers=[];
@@ -104,7 +106,7 @@ function openForm(kind){
 }
 $('#fields').addEventListener('click',e=>{if(e.target.closest('.remove-row'))e.target.closest('.destination,.filter').remove();});
 $('#editor').addEventListener('submit',async e=>{
- e.preventDefault();if(editingEntity || formKind?.endsWith('_interceptors'))return;if(busy)return;setBusy(true);$('#submit-form').disabled=true;$('#form-error').hidden=true;
+ e.preventDefault();if(editingEntity || formKind?.endsWith('_interceptors'))return;if(busy||!canEdit)return;setBusy(true);$('#submit-form').disabled=true;$('#form-error').hidden=true;
  try{
  let data=Object.fromEntries(new FormData(e.target)),path=editingUser?'users/'+encodeURIComponent(editingUser)+'/quotas':formKind;
  if(formKind==='mt'||formKind==='mo'){
@@ -117,10 +119,11 @@ $('#editor').addEventListener('submit',async e=>{
 });
 document.addEventListener('click',async e=>{
  const nav=e.target.closest('[data-page]');if(nav)navigate(nav.dataset.page);
- const create=e.target.closest('[data-create]');if(create)openForm(create.dataset.create);
+ const create=e.target.closest('[data-create]');if(create&&canEdit)openForm(create.dataset.create);
  const button=e.target.closest('[data-op]');if(!button||busy||!state)return;
  const {op,id}=button.dataset;
  if(op==='edit'){openEntityEditor(page,id);return;}
+ if(!canEdit)return;
  if(op==='quotas'){
   const user=state.users.find(u=>u.uid===id);openForm('users');editingUser=id;
   $('#modal-title').textContent='Edit quotas · '+user.username;$('#submit-form').textContent='Update quotas';
@@ -130,11 +133,19 @@ document.addEventListener('click',async e=>{
  setBusy(true);button.disabled=true;
  try{const path=(page==='mt'||page==='mo'?'routes/'+page:page)+'/'+encodeURIComponent(id);await api(path+(op==='delete'?'':'/'+op),op==='delete'?'DELETE':'POST');toast('Gateway updated.');await refresh();}catch(err){$('#error').textContent=err.message;$('#error').hidden=false;}finally{setBusy(false);button.disabled=false;}
 });
-$('#save').addEventListener('click',async()=>{if(busy||!state)return;setBusy(true);$('#save').disabled=true;try{await api('persist','POST',{profile:'jcli-prod'});toast(state.mode==='demo'?'Demo configuration marked saved. Data remains temporary.':'Configuration saved to jcli-prod.');await refresh();}catch(err){$('#error').textContent=err.message;$('#error').hidden=false;}finally{setBusy(false);$('#save').disabled=false;}});
+$('#save').addEventListener('click',async()=>{if(busy||!state||!canEdit)return;setBusy(true);$('#save').disabled=true;try{await api('persist','POST',{profile:'jcli-prod'});toast(state.mode==='demo'?'Demo configuration marked saved. Data remains temporary.':'Configuration saved to jcli-prod.');await refresh();}catch(err){$('#error').textContent=err.message;$('#error').hidden=false;}finally{setBusy(false);$('#save').disabled=false;}});
 $('#refresh').addEventListener('click',refresh);
 $('#close-modal').onclick=$('#cancel-modal').onclick=()=>$('#modal').close();
-$('#login-form').addEventListener('submit',async e=>{e.preventDefault();token=$('#token').value;$('#login-error').textContent='';if(await refresh()){sessionStorage.setItem('jasmin-token',token);$('#token').value='';$('#login').close();}else{$('#login-error').textContent='Unable to connect. Check the token and gateway configuration.';}});
-$('#login').addEventListener('cancel',e=>e.preventDefault());
-$('#logout').onclick=()=>{token='';sessionStorage.removeItem('jasmin-token');++refreshVersion;gateways=[];selectedGateway='';$('#gateway-select').disabled=true;$('#gateway-target').textContent='Workspace locked';state=undefined;$('#content').innerHTML='<div class="empty">Workspace locked</div>';$('#login').showModal();};
+$('#login-form').addEventListener('submit',async e=>{
+ e.preventDefault();const previous=token;token=$('#token').value;$('#login-error').textContent='';
+ try{const session=await api('session');if(!session.can_edit)throw new Error('Invalid admin token.');
+  canEdit=true;sessionStorage.setItem('jasmin-token',token);$('#token').value='';$('#login').close();syncAccess();await refresh();
+ }catch(error){token=previous;$('#login-error').textContent=error.message;}
+});
+$('#close-login').onclick=()=>$('#login').close();
+$('#logout').onclick=async()=>{
+ if(!canEdit){$('#login-error').textContent='';$('#login').showModal();return;}
+ token='';canEdit=false;sessionStorage.removeItem('jasmin-token');++refreshVersion;$('#modal').close();syncAccess();if(state)render();await refresh();
+};
 window.addEventListener('hashchange',()=>{const next=location.hash.slice(1);if(titles[next])navigate(next);});
 navigate(titles[location.hash.slice(1)]?location.hash.slice(1):'overview');refresh();

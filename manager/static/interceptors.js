@@ -2,7 +2,7 @@ let editingInterceptor=null, interceptorGateway='';
 function interceptorDirection(){return page.slice(0,2);}
 function renderInterceptors(){
  const direction=interceptorDirection(), items=state.interceptors[direction];
- $('#content').innerHTML=`<section class="panel"><div class="panel-head"><div><h2>${titles[page]}</h2><p>Higher orders run first. Order 0 is the fallback. Filters use AND matching.</p></div><div class="toolbar"><button class="danger" id="flush-interceptors" ${items.length?'':'disabled'}>Remove all</button><button class="primary" data-create="${page}">+ Add interceptor</button></div></div>${items.length?`<div class="table-wrap"><table><thead><tr><th>Order</th><th>Type</th><th>Filters</th><th>Python script</th><th></th></tr></thead><tbody>${items.map(item=>`<tr><td>${item.order}</td><td>${esc(item.type)}</td><td class="route-filters">${item.filters.map(esc).join('<br>')||'Fallback · all unmatched messages'}</td><td><div class="script-preview mono">${esc(item.script.split('\n').find(line=>line.trim())||'Empty script')}</div><small>${item.script.split('\n').length} lines</small></td><td><div class="row-actions"><button data-interceptor-edit="${item.order}">View / edit</button><button class="danger" data-interceptor-delete="${item.order}">Delete</button></div></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><strong>No interceptors configured</strong>Add a filtered script or a default interceptor.</div>'}<div class="hint">Changes apply immediately on ${esc(gatewayName())}. Save configuration to persist them. Script execution requires a connected Jasmin interceptor service.</div></section>`;
+ $('#content').innerHTML=`<section class="panel"><div class="panel-head"><div><h2>${titles[page]}</h2><p>Higher orders run first. Order 0 is the fallback. Filters use AND matching.</p></div><div class="toolbar"><button class="danger" id="flush-interceptors" ${items.length?'':'disabled'}>Remove all</button><button class="primary" data-create="${page}">+ Add interceptor</button></div></div>${items.length?`<div class="table-wrap"><table><thead><tr><th>Order</th><th>Type</th><th>Filters</th><th>Python script</th><th></th></tr></thead><tbody>${items.map(item=>`<tr><td>${item.order}</td><td>${esc(item.type)}</td><td class="route-filters">${item.filters.map(esc).join('<br>')||'Fallback · all unmatched messages'}</td><td><div class="script-preview mono">${esc(item.script.split('\n').find(line=>line.trim())||'Empty script')}</div><small>${item.script.split('\n').length} lines</small></td><td><div class="row-actions"><button data-interceptor-edit="${item.order}">${canEdit?'View / edit':'View'}</button><button class="danger" data-interceptor-delete="${item.order}">Delete</button></div></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><strong>No interceptors configured</strong>Add a filtered script or a default interceptor.</div>'}<div class="hint">Changes apply immediately on ${esc(gatewayName())}. Save configuration to persist them. Script execution requires a connected Jasmin interceptor service.</div></section>`;
 }
 function openInterceptorForm(kind, item=null){
  if(!state||busy)return;
@@ -10,7 +10,7 @@ function openInterceptorForm(kind, item=null){
  const direction=kind.slice(0,2), preserve=item && !item.editable_filters;
  $('#editor').reset();$('#form-error').hidden=true;$('#submit-form').disabled=false;
  $('#modal').classList.add('interceptor-form');
- $('#modal-title').textContent=(item?'Edit ':'Create ')+direction.toUpperCase()+' interceptor';
+ $('#modal-title').textContent=(item?(canEdit?'Edit ':'View '):'Create ')+direction.toUpperCase()+' interceptor';
  $('#submit-form').textContent=item?'Save changes':'Create interceptor';
  $('#fields').innerHTML=select('type','Interceptor type',[['Static','Static · filtered'],['Default','Default · fallback']])+field('order','Order','number',item?.order??10)+`<div class="interceptor-note">Target: <strong>${esc(gatewayName())}</strong>. This Python script runs on matching messages in Jasmin. Changes apply immediately; the manager only checks syntax.</div>`+(preserve?`<div class="full"><label>Existing filters (preserved)</label><p class="interceptor-filters">${item.filters.map(esc).join('\n')}</p><small>These filter types cannot be edited in this form. Script changes preserve them.</small></div>`:`<div class="full" id="filters"></div><button type="button" id="add-filter">+ Add filter</button>`)+`<label class="full">Python script<textarea class="script-editor" name="script" required spellcheck="false" aria-label="Python script"></textarea><div class="field-help">Available globals include routable, smpp_status and http_status. The script source is stored in Jasmin.</div></label>`;
  const type=$('#fields [name="type"]'), order=$('#fields [name="order"]');
@@ -30,12 +30,12 @@ function openInterceptorForm(kind, item=null){
   const updateType=()=>{const fallback=type.value==='Default';$('#filters').hidden=fallback;$('#add-filter').hidden=fallback;if(!item)order.value=fallback?0:10;};
   type.onchange=updateType;updateType();
  }
- $('#modal').showModal();
+ $('#modal').showModal();applyReadonlyForm();
 }
 $('#modal').addEventListener('close',()=>$('#modal').classList.remove('interceptor-form'));
 $('#editor').addEventListener('submit',async e=>{
  if(!formKind?.endsWith('_interceptors'))return;
- e.preventDefault();if(busy)return;
+ e.preventDefault();if(busy||!canEdit)return;
  if(interceptorGateway!==selectedGateway){$('#modal').close();return;}
  setBusy(true);$('#submit-form').disabled=true;$('#form-error').hidden=true;
  try{
@@ -54,7 +54,7 @@ document.addEventListener('click',async e=>{
  const edit=e.target.closest('[data-interceptor-edit]');
  if(edit){openInterceptorForm(page,state.interceptors[interceptorDirection()].find(item=>item.order===Number(edit.dataset.interceptorEdit)));return;}
  const remove=e.target.closest('[data-interceptor-delete]'), flush=e.target.closest('#flush-interceptors');
- if(!remove&&!flush)return;
+ if((!remove&&!flush)||!canEdit)return;
  const direction=interceptorDirection();
  const item=remove?state.interceptors[direction].find(item=>item.order===Number(remove.dataset.interceptorDelete)):null;
  if(!confirm(`Remove ${flush?'ALL '+direction.toUpperCase()+' interceptors':'interceptor '+item.order} on ${gatewayName()}? This applies immediately.`))return;

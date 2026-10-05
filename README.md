@@ -26,7 +26,7 @@ set +a
 .venv/bin/python -m manager.server --port 8090
 ```
 
-Enter `MANAGER_TOKEN` in the browser login. It is stored in sessionStorage for the current tab; Lock clears it. The server reads environment variables; it does not automatically load `.env`.
+Visitors can browse every gateway and inspect configuration fields without signing in. Passwords remain excluded from API responses. Add, edit, delete, enable/disable, start/stop, and save operations require authentication with `MANAGER_TOKEN`, enforced by the server as well as the UI. Choose **Sign in** to enable editing; **Sign out** restores read-only access and clears the token from sessionStorage for the current tab. A local demo without `MANAGER_TOKEN` is read-only; set the variable before starting it to enable sign-in. The server reads environment variables; it does not automatically load `.env`.
 
 Set the router credentials from `[router]` in `jasmin.cfg`, and SMPP manager credentials from `[client-management]`. Default PB ports are 8988 and 8989 respectively; hosts, ports and usernames are configurable independently in `.env`. Use the plaintext PB login passwords, not the hashed values stored in Jasmin's configuration. Live startup requires an admin token of at least 24 characters and a password for each PB service with authentication enabled.
 
@@ -59,13 +59,13 @@ For API clients, authenticated `GET /api/gateways` returns the available IDs, la
 
 Create a group, add users and upstream connections, start a connection, then configure routes. Routes are evaluated from highest order to lowest; order 0 must be a default route. For an MO SMPP destination, use the downstream client's system ID (username); that client needs a receiver/transceiver bind. HTTP MO destinations are stored in routes, not in jCli's independent HTTP connector registry.
 
-Existing objects created elsewhere are listed. Route definitions are changed by removing and recreating the route. Fine-grained user authorization editing, gateway config loading, traffic statistics and audit history are not included. Account deletion and multi-quota updates are not transactional across other tools managing the gateway; refresh after an error to verify partial outcomes. Management operations from this server are serialized.
+Existing objects created elsewhere are listed. Route definitions are changed by removing and recreating the route. Gateway config loading, traffic statistics and audit history are not included. Account deletion and multi-quota updates are not transactional across other tools managing the gateway; refresh after an error to verify partial outcomes. Management operations from this server are serialized.
 
 ## Tables, edits and filter selection
 
 Click any data-column heading to sort ascending; click again for descending. Numeric values sort numerically, including route priorities and rates. Sorting is retained across refreshes on the current page and works with table search.
 
-**Users → Edit** changes username, group and password. A blank password preserves the current password. IDs, quotas, permissions, value filters and enabled status are retained; use **Quotas** to change balances and limits. The backend reads the latest user before replacing it, but external traffic/admin updates are not transactional with identity edits.
+**Users → Edit** changes username, group, password and the complete MT messaging / SMPP credentials: authorizations, regex value filters, default source address and all quotas. Field names match jCli. Blank passwords preserve the current password; blank quotas mean ND and blank default source means None. Only changed credential fields are submitted, preserving untouched live balances and counters. User ID and enabled status are retained. **Quotas** remains available for quick balance/throughput changes. The backend reads the latest user before replacing it, but external traffic/admin updates are not transactional with identity edits.
 
 **SMPP connections → Edit** changes host, port, system ID, password, bind mode and throughput. Stop the connection before saving edits; it remains stopped afterward. A blank password keeps the existing one. Jasmin PB has no connector-update call, so the manager removes/re-adds the stopped connector with the same ID and a copy of all advanced settings. It does not request queue deletion. Routes remain attached by ID. Failed replacement attempts restoration; an uncertain outcome is reported so you can inspect the gateway before retrying. Recreating the service resets its process-local counters. Save configuration after successful edits.
 
@@ -135,3 +135,24 @@ Results are recorded in `artifacts/live-test.json`. SMPP connector credentials a
 - [Jasmin developer FAQ: PB access](https://docs.jasminsms.com/en/latest/faq/developers.html)
 - [Router proxy implementation](https://github.com/jookies/jasmin/blob/master/jasmin/routing/proxies.py)
 - [SMPP manager proxy implementation](https://github.com/jookies/jasmin/blob/master/jasmin/managers/proxies.py)
+
+## Installed systemd service
+
+Production deployment: `http://10.36.34.52:8090` (private interface), service `jasmin-manager.service`. The manager uses a dedicated virtual environment and an unprivileged dynamic user. It is enabled at boot and restarts on failure.
+
+- Application release: `/opt/jasmin-manager/releases/20261005-credentials`
+- Active release symlink: `/opt/jasmin-manager/current`
+- Virtual environment: `/opt/jasmin-manager/venv`
+- Configuration: `/etc/jasmin-manager/manager.env` (root-owned, mode 0600)
+- Unit: `/etc/systemd/system/jasmin-manager.service` (source in `deploy/`)
+
+On the server:
+
+```bash
+sudo systemctl status jasmin-manager
+sudo journalctl -u jasmin-manager -n 100 --no-pager
+sudoedit /etc/jasmin-manager/manager.env
+sudo systemctl restart jasmin-manager
+```
+
+Gateway profiles and the manager token are loaded from the server environment file. Changing the local `.env` does not automatically change the deployed service. Application updates should be copied to a new root-owned release directory, then switch `current` and restart only `jasmin-manager`. Keep the preceding release for rollback. Existing Jasmin services do not need a restart.

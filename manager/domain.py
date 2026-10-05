@@ -1,4 +1,5 @@
 """Translate validated web input into Jasmin's native management objects."""
+from manager.credentials import credential_view, apply_credentials
 import hashlib
 import pickle
 import math
@@ -90,7 +91,7 @@ def make_route(data, direction, users, groups, connector_ids, existing_filters=N
 
 
 def user_view(user):
-    return dict(revision=user_revision(user), uid=user.uid, gid=user.group.gid, username=user.username, enabled=user.enabled,
+    return dict(credentials=credential_view(user), revision=user_revision(user), uid=user.uid, gid=user.group.gid, username=user.username, enabled=user.enabled,
                 **{key: user.mt_credential.getQuota(key) for key in
                    ('balance', 'submit_sm_count', 'http_throughput', 'smpps_throughput')})
 
@@ -195,8 +196,11 @@ def make_interceptor(data, direction, users, groups, connector_ids, existing=Non
 
 
 def user_revision(user):
-    # Traffic updates quotas independently of identity edits.
-    return hashlib.sha256(pickle.dumps((user.uid, user.username, user.group.gid, user.password, user.enabled))).hexdigest()
+    # Exclude traffic-consumed quotas but detect concurrent authorization/filter/limit edits.
+    credentials = credential_view(user)
+    for key in ('balance', 'sms_count'):
+        credentials['mt_messaging_cred']['quota'].pop(key)
+    return hashlib.sha256(pickle.dumps((user.uid, user.username, user.group.gid, user.password, user.enabled, credentials))).hexdigest()
 
 
 def edit_user(existing, data, groups, users):
@@ -211,6 +215,7 @@ def edit_user(existing, data, groups, users):
     result = copy.deepcopy(existing)
     result.username, result.group = check.username, group
     if data.get('password'): result.password = check.password
+    apply_credentials(result, data.get('credentials', {}))
     return result
 
 

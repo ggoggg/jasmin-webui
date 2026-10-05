@@ -197,7 +197,7 @@ def main():
             page=browser.new_page(viewport={'width':1440,'height':1000})
             errors=[];page.on('pageerror',lambda err:errors.append(str(err)))
             page.add_init_script('sessionStorage.setItem("jasmin-gateway", '+json.dumps(selected)+');')
-            page.goto(base);page.locator('#token').fill(token);page.locator('#login-form button').click()
+            page.goto(base);page.locator('#logout').click();page.locator('#token').fill(token);page.locator('#login-form [type="submit"]').click()
             expect(page.locator('#mode')).to_have_text('Live gateway',timeout=30000)
             page.locator('nav [data-page="connectors"]').click()
             page.locator('#search').fill(uid)

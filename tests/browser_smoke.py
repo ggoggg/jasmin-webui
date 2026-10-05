@@ -12,7 +12,7 @@ from playwright.sync_api import sync_playwright, expect
 def main():
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
-    proc = subprocess.Popen([sys.executable, '-m', 'manager.server', '--demo', '--port', str(port)], env={**{k:v for k,v in os.environ.items() if k != 'MANAGER_TOKEN'}, 'JASMIN_GATEWAYS':'production,test', 'JASMIN_DEFAULT_GATEWAY':'production'}, stdout=subprocess.DEVNULL)
+    proc = subprocess.Popen([sys.executable, '-m', 'manager.server', '--demo', '--port', str(port)], env={**{k:v for k,v in os.environ.items() if k != 'MANAGER_TOKEN'}, 'MANAGER_TOKEN':'browser-test-token-1234567890', 'JASMIN_GATEWAYS':'production,test', 'JASMIN_DEFAULT_GATEWAY':'production'}, stdout=subprocess.DEVNULL)
     url = f'http://127.0.0.1:{port}'
     try:
         for _ in range(100):
@@ -25,6 +25,16 @@ def main():
             page.on('pageerror',lambda error: errors.append(str(error)))
             page.goto(url)
             expect(page.locator('#mode')).to_have_text('Demo workspace')
+            expect(page.locator('#login')).not_to_be_visible()
+            expect(page.locator('#save')).not_to_be_visible()
+            page.locator('#logout').click()
+            page.locator('#token').fill('wrong-token')
+            page.locator('#login-form [type="submit"]').click()
+            expect(page.locator('#login-error')).to_contain_text('Invalid admin token')
+            page.locator('#token').fill('browser-test-token-1234567890')
+            page.locator('#login-form [type="submit"]').click()
+            expect(page.locator('#access-mode')).to_have_text('Editing enabled')
+            expect(page.locator('#login')).not_to_be_visible()
             modal=page.locator('#modal')
             def create(kind, values):
                 page.locator(f'[data-create="{kind}"]').first.click()
@@ -48,9 +58,24 @@ def main():
             expect(page.locator('tbody')).to_contain_text('500')
             page.locator('[data-op="edit"]').click()
             modal.locator('[name="username"]').fill('updatedname')
+            expect(modal.locator('[data-section="authorization"]')).to_have_count(14)
+            modal.locator('[data-credential="mt_messaging_cred"][data-key="http_bulk"]').check()
+            modal.locator('[data-section="valuefilter"][data-key="dst_addr"]').fill('^995')
+            modal.locator('[data-section="defaultvalue"][data-key="src_addr"]').fill('Brand')
+            modal.locator('[data-key="early_percent"]').fill('25')
+            modal.locator('[data-key="sms_count"]').fill('200')
+            modal.locator('[data-key="max_bindings"]').fill('3')
             modal.locator('[type="submit"]').click()
             expect(modal).not_to_be_visible()
             expect(page.locator('tbody')).to_contain_text('updatedname')
+            page.locator('[data-op="edit"]').click()
+            expect(modal.locator('[data-key="http_bulk"]')).to_be_checked()
+            expect(modal.locator('[data-section="valuefilter"][data-key="dst_addr"]')).to_have_value('^995')
+            expect(modal.locator('[data-key="early_percent"]')).to_have_value('25')
+            expect(modal.locator('[data-key="max_bindings"]')).to_have_value('3')
+            modal.locator('[data-key="max_bindings"]').fill('')
+            modal.locator('[type="submit"]').click()
+            expect(modal).not_to_be_visible()
             page.locator('nav [data-page="connectors"]').click()
             page.once('dialog',lambda dialog:dialog.accept())
             page.locator('[data-op="stop"]').click()
@@ -116,7 +141,7 @@ def main():
             expect(page.locator('.stat-value').first).to_have_text('1')
             # Hold a production refresh response while switching to the test gateway.
             page.evaluate('''() => {
-                const original=window.fetch;
+                const original=window.fetch;window.originalFetch=original;
                 window.fetch=async (...args)=>{
                     const response=await original(...args);
                     if(String(args[0]).endsWith('/api/state') && args[1].headers['X-Jasmin-Gateway']==='production'){
@@ -133,6 +158,47 @@ def main():
             page.wait_for_function('document.querySelector("#refresh").disabled === false')
             expect(page.locator('#gateway-select')).to_have_value('test')
             expect(page.locator('.stat-value').first).to_have_text('0')
+            page.evaluate('window.fetch=window.originalFetch')
+            page.locator('#logout').click()
+            expect(page.locator('#access-mode')).to_have_text('Read only')
+            expect(page.locator('#save')).not_to_be_visible()
+            page.locator('#gateway-select').select_option('production')
+            expect(page.locator('.stat-value').first).to_have_text('1')
+            page.locator('nav [data-page="users"]').click()
+            expect(page.locator('[data-create="users"]')).not_to_be_visible()
+            expect(page.locator('[data-op="delete"]').first).not_to_be_visible()
+            page.locator('[data-op="edit"]').first.click()
+            expect(modal.locator('[name="username"]')).to_have_attribute('readonly','')
+            expect(modal.locator('[data-key="http_send"]')).to_be_disabled()
+            expect(modal.locator('[type="submit"]')).not_to_be_visible()
+            page.locator('#cancel-modal').click()
+            page.locator('nav [data-page="mt_interceptors"]').click()
+            page.locator('[data-interceptor-edit]').first.click()
+            expect(modal.locator('[name="script"]')).to_have_attribute('readonly','')
+            expect(modal.locator('[type="submit"]')).not_to_be_visible()
+            page.locator('#cancel-modal').click()
+            page.locator('nav [data-page="connectors"]').click()
+            expect(page.locator('[data-op="start"]')).not_to_be_visible()
+            page.locator('[data-op="edit"]').click()
+            expect(modal.locator('[name="host"]')).to_have_value('edited.example.com')
+            expect(modal.locator('[name="host"]')).to_have_attribute('readonly','')
+            expect(modal.locator('[name="bindOperation"]')).to_be_disabled()
+            page.locator('#cancel-modal').click()
+            # Losing authentication during a refresh also locks an already open form.
+            page.locator('#logout').click()
+            page.locator('#token').fill('browser-test-token-1234567890')
+            page.locator('#login-form [type="submit"]').click()
+            expect(page.locator('#login')).not_to_be_visible()
+            expect(page.locator('#access-mode')).to_have_text('Editing enabled')
+            page.locator('nav [data-page="users"]').click()
+            page.locator('[data-op="edit"]').click()
+            expect(modal.locator('[name="username"]')).to_be_editable()
+            page.evaluate("async () => { token='expired-token'; await refresh(); }")
+            expect(page.locator('#access-mode')).to_have_text('Read only')
+            expect(modal.locator('[name="username"]')).to_have_attribute('readonly','')
+            expect(modal.locator('[data-key="http_send"]')).to_be_disabled()
+            expect(modal.locator('[type="submit"]')).not_to_be_visible()
+            page.locator('#cancel-modal').click()
             assert not errors, errors
             browser.close()
             print('Browser smoke passed: group/user/connector, bind control, quota update, MT/MO creation, persistence, responsive layout.')

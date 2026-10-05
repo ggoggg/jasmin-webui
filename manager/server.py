@@ -24,9 +24,10 @@ class API(resource.Resource):
         request.setHeader(b'cache-control', b'no-store')
         request.setHeader(b'x-content-type-options', b'nosniff')
         auth = request.getHeader('authorization') or ''
-        if self.token and not hmac.compare_digest(auth.encode(), ('Bearer ' + self.token).encode()):
+        can_edit = bool(self.token) and hmac.compare_digest(auth.encode(), ('Bearer ' + self.token).encode())
+        if request.method != b'GET' and not can_edit:
             request.setResponseCode(401)
-            return b'{"error":"Enter the manager admin token to connect."}'
+            return b'{"error":"A valid MANAGER_TOKEN is required to change gateway configuration."}'
         if request.method not in (b'GET', b'POST', b'DELETE'):
             request.setResponseCode(405)
             return b'{"error":"Method not allowed."}'
@@ -44,8 +45,13 @@ class API(resource.Resource):
         except (ValueError, UnicodeError):
             request.setResponseCode(400)
             return b'{"error":"Invalid JSON request (maximum 64 KiB)."}'
+        if request.method == b'GET' and path == ['session']:
+            return json.dumps({'can_edit': can_edit}).encode()
+        if request.method == b'GET' and path not in (['gateways'], ['state']):
+            request.setResponseCode(404)
+            return b'{"error":"Unknown read endpoint."}'
         if request.method == b'GET' and path == ['gateways']:
-            return json.dumps({'default': self.default, 'gateways': [
+            return json.dumps({'can_edit': can_edit, 'default': self.default, 'gateways': [
                 {key: profile[key] for key in ('id', 'name', 'host')} for profile in self.profiles.values()
             ]}).encode()
         gateway_id = request.getHeader('x-jasmin-gateway')
@@ -58,6 +64,7 @@ class API(resource.Resource):
         def success(result):
             if path == ['state']:
                 result['gateway_id'] = gateway_id
+                result['can_edit'] = can_edit
             if not request._disconnected:
                 request.write(json.dumps(result).encode())
                 request.finish()
